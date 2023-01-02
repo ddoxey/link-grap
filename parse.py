@@ -442,11 +442,19 @@ def linkgrammar_layout(db):
         for use with networkx.draw().
     """
     pos = {}
+    labels = {}
+
     for node in db.nodes():
         pos[node] = [node.x, node.tier_n]
-    return pos
 
-def generate_graph(db):
+    for edge in db.edges():
+        a = next(db.query({'id': {'$eq': edge.from_id}}))
+        b = next(db.query({'id': {'$eq': edge.to_id}}))
+        labels[(a, b)] = edge.__class__.__name__[0]
+
+    return pos, labels
+
+def generate_graph(db, labels):
     """
         Produce a networkx.DiGraph for the given NodeDB.
     """
@@ -455,10 +463,8 @@ def generate_graph(db):
     for node in db.nodes():
         dg.add_node(node)
 
-    for edge in db.edges():
-        a = next(db.query({'id': {'$eq': edge.from_id}}))
-        b = next(db.query({'id': {'$eq': edge.to_id}}))
-        dg.add_edge(a, b)
+    for (n1, n2), _ in labels.items():
+        dg.add_edge(n1, n2)
 
     return dg
 
@@ -483,14 +489,16 @@ def parse(sentence):
 
     print(db)
 
-    dg = generate_graph(db)
+    pos, labels = linkgrammar_layout(db)
 
-    pos = linkgrammar_layout(db)
+    dg = generate_graph(db, labels)
+
     nx.draw(dg, pos,
             with_labels = True,
             node_size   = 1500,
             font_size   = 8,
             font_weight = 'bold')
+    nx.draw_networkx_edge_labels(dg, pos, edge_labels=labels)
 
     plt.savefig(PNG_FILE)
 
