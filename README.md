@@ -9,7 +9,8 @@ Requirements:
 
 Usage:
 
-    `parse.py My hovercraft is full of eels.`
+    parse.py My hovercraft is full of eels.
 
 The result will be link-parser.png in the user's Desktop directory.
 
+![My hovercraft is full of eels.](https://github.com/ddoxey/link-graph/blob/main/link-parser.png)
