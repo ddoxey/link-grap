@@ -335,17 +335,19 @@ def get_linkgrammar_text(sentence):
     for line in p.stdout.split("\n"):
         line = line.rstrip()
         text = line.lstrip()
-        if text.startswith('Press RETURN for'):
-            break
-        if text.startswith('linkparser> Freeing dictionary'):
-            break
         if len(text) == 0:
+            if len(output):
+                break
             continue
         if text[0] == '+' and text[-1] == '+':
             output = []
             skipping = False
         if skipping:
             continue
+        if text.startswith('Press RETURN for'):
+            break
+        if text.startswith('linkparser> Freeing dictionary'):
+            break
         output.append(line)
 
     if len(output) == 0:
@@ -361,7 +363,7 @@ def extract_elements(line_n, line):
     """
     elements = []
     line = line.replace('|', " ")
-    if line.startswith('LEFT-WALL'):
+    if line_n == 0:
         indent = 0
         tokens = line.split(' ')
         for token_n, token in enumerate(tokens):
