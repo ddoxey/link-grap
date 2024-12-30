@@ -302,22 +302,22 @@ def extract_elements(line_n, line):
         for token_n, token in enumerate(tokens):
             elements.append(Element(text = token, col_i = token_n, row_i = line_n))
         return elements
-    xs = [x_i for x_i, c in enumerate(line) if c == '+' for _ in (0, 1)]
-    if len(xs) == 0:
-        return None
-    xs = xs[1:-1]
     tokens = line.split('+')
     if len(tokens) > 0:
+        xs = [x_i for x_i, c in enumerate(line) if c == '+' for _ in (0, 1)]
+        xs = [0, *xs, len(line) - 1]
         for token_n, token in enumerate([t for t in tokens
                                          if len(t) > 0]):
+            source_x = xs.pop(0)
+            target_x = xs.pop(0)
             if len(token.strip()) == 0:
                 continue
             label = token.replace('-', "").replace('>', "")
             elements.append(Element(text = label,
                                     col_i = len(elements),
                                     row_i = line_n,
-                                    source_x = xs.pop(0),
-                                    target_x = xs.pop(0)))
+                                    source_x = source_x,
+                                    target_x = target_x))
     if len(elements) == 0:
         return None
     return elements
