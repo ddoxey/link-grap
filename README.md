@@ -4,7 +4,7 @@ Produce a graph image for link-parser sentence diagram.
 
 Requirements:
 
-    * link-4.1b installed in the user's home dir
+    * link-5.12.5 installed in the user's home dir
     * write access to Desktop directory in the user's home dir
 
 Usage:

@@ -6,62 +6,34 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from pprint import pprint, pformat
 
-PARSE = f'{os.environ["HOME"]}/link-4.1b/parse'
+PARSE = f'{os.environ["HOME"]}/link-5.12.5/link-parser/link-parser'
 PNG_FILE = f'{os.environ["HOME"]}/Desktop/link-parser.png'
 
-"""
-   +-----------------------Xp-----------------------+
-   |       +--------Ix-------+                      |
-   |       +----SIs---+      |    +-----Osn----+    |
-   +---Qd--+    +-D*u-+      +-MVp+-J-+   +-Ds-+    |
-   |       |    |     |      |    |   |   |    |    |
-EFT-WALL may.v the force.n be.v with you my child.n .
+r"""
+    +-------------------Xp------------------+
+    +------------>WV----------->+           |
+    |       +---------Ix--------+           |
+    |       +----SIs----+       |           |
+    +-->Qd--+    +--Dmu-+       +-Pp-+-J-+  |
+    |       |    |      |       |    |   |  |
+LEFT-WALL may.v the force.n-u be.v with you . 
 
-
-[8]                                     Xp
-                                        / \
-[7]    (l)------------------------------+ +----------------------------------------(r)
-        |                                                                           |
-[6]     |                    Ix                                                     |
-        |                    / \                                                    |
-[5]     |        (l)---------+ +--------(r)                                         |
-        |         |                      |                                          |
-[4]     |         |      SIs             |                        Osn               |
-        |         |      / \             |                        / \               |
-[3]     |        (l)-----+ +----(r)      |          (l)-----------+ +---------(r)   |
-        |         |              |       |           |                         |    |
-[2]     |   Qd    |        D*u   |       |   MVp     |      J            Ds    |    |
-        |   / \   |        / \   |       |   / \     |     / \           / \   |    |
-[1]    (l)--+ +--(r)  (l)--+ +--(r)     (l)--+ +-(r) | (l)-+ +--(r) (l)--+ +--(r)   |
-        |         |    |         |       |         \ | /         |   |         |    |
-[0] LEFT-WALL   may.v the     force.n   be.v        with        you  my     child.n .
-
-
-        Nodes:
-
-            Grammar  - link type
-            Left     - left edge
-            Right    - right edge
-            Language - human language leaf node
 """
 
 class Node:
     """
-        Each node is based on the actual coordinates of the element
-        parsed from the raw text of the link-parse ouput text.
-        The line number translates to y, the column numbers become x1
-        for the left edge, x for the center, x2 for the right edge.
-        The tier number is calculated later as the edges are added
-        later as appearing in between the tiers with Grammar and
-        Language nodes.
+        Each node is a language token, including LEFT-WALL and punctuation.
     """
     def __init__(self, element):
-        self.text, self.pos = element.text, element.pos
-        self.y = element.y
-        self.tier_n = 0
+        self.id = element.id
+        self.tier_i = 0
+        self.col_i = element.col_i
         self.x = element.x
-        self.x1 = element.x1
-        self.x2 = element.x2
+        self.source_x, self.target_x = element.get_xx()
+        self.text, self.tag = element.text, element.tag
+        self.label = element.text
+        if self.tag is not None and len(self.tag) > 0:
+            self.label += f'.{element.tag}'
 
     def __lt__(self, other):
         """
@@ -76,20 +48,21 @@ class Node:
         """
             The __repr__ function is used in pprint debug formatting.
         """
-        coords = f'{self.tier_n}:{self.y}:{self.x1},{self.x},{self.x2}'
-        if hasattr(self, 'pos') and len(self.pos):
-            return f'{self.__hash__()}:{self.text},{self.pos}|{coords}'
+        coords = f'{self.tier_i}:{self.col_i}'
+        if hasattr(self, 'tag') and self.tag is not None and len(self.tag) > 0:
+            return f'{self.__hash__()}:{self.text},{self.tag}|{coords}'
         if hasattr(self, 'text'):
             return f'{self.__hash__()}:{self.text}|{coords}'
         return f'{self.__hash__()}:{coords}'
 
-    @property
-    def id(self):
+    def get(self, field, default=None):
         """
-            The id property makes a convenient unique key to identify nodes
-            and edges on the graph.
+            Provide the value of the requested field or the given default
+            value if the property is unknown.
         """
-        return str(round(float(f'{self.tier_n:02d}{self.y:02d}{self.x:3.3f}')))
+        if hasattr(self, field):
+            return getattr(self, field)
+        return default
 
     def matches(self, where):
         """
@@ -97,92 +70,68 @@ class Node:
             matches the given where clause.
         """
         def cmp(op, ref_val, val):
+            if isinstance(ref_val, list):
+                ref_val = [float(v) for v in ref_val]
+            elif isinstance(ref_val, str):
+                if ref_val.isdigit() or all(e.isdigit() for e in ref_val.split('.')):
+                    ref_val = float(ref_val)
+            if isinstance(val, str):
+                if val.isdigit() or all(e.isdigit() for e in val.split('.')):
+                    val = float(val)
             match op:
                 case '$eq':
-                    return float(val) == float(ref_val)
+                    return val == ref_val
                 case '$ne':
-                    return float(val) != float(ref_val)
+                    return val != ref_val
                 case '$lte':
-                    return float(val) <= float(ref_val)
+                    return val <= ref_val
                 case '$gte':
-                    return float(val) >= float(ref_val)
+                    return val >= ref_val
                 case '$gt':
-                    return float(val) > float(ref_val)
+                    return val > ref_val
                 case '$lt':
-                    return float(val) < float(ref_val)
+                    return val < ref_val
                 case '$between':
-                    return float(ref_val[0]) <= float(val) <= float(ref_val[1])
+                    return ref_val[0] <= val <= ref_val[1]
                 case _:
                     raise Exception(f'Unrecognized operator: {op}')
             return False
         for field, condition in where.items():
             op, reference_value = list(condition.items())[0]
-            match field:
-                case 'y':
-                    if not cmp(op, reference_value, self.y):
-                        return False
-                case 'x1':
-                    if not cmp(op, reference_value, self.x1):
-                        return False
-                case 'x':
-                    if not cmp(op, reference_value, self.x):
-                        return False
-                case 'x2':
-                    if not cmp(op, reference_value, self.x2):
-                        return False
-                case 'tier_n':
-                    if not cmp(op, reference_value, self.tier_n):
-                        return False
-                case 'id':
-                    if not cmp(op, reference_value, self.id):
-                        return False
-                case _:
-                    raise Exception(f'Unrecognized field: {field}')
+            if not hasattr(self, field):
+                raise Exception(f'Unrecognized {__class__.__name__} field: {field}')
+            if not cmp(op, reference_value, getattr(self, field)):
+                return False
         return True
 
 
-class Language(Node):
-    """
-        The Language Nodes represents the human readable language
-        node (based on the original text) and will appear as leaf
-        nodes on the grap.
-    """
-    def __init__(self, element):
-        super().__init__(element)
-    def __repr__(self):
-        return f'{self.__class__.__name__}({super().__str__()})'
-    def __lt__(self, other):
-        return super().__lt__(other)
-
-class Grammar(Node):
+class Edge(Node):
     """
         The Grammar Node represents link-parser relationship nodes.
     """
     def __init__(self, element):
         super().__init__(element)
+        self.source_id = None
+        self.target_id = None
+
+    def set_source(self, node):
+        if self.source_x == node.x:
+            self.source_id = node.id
+            return True
+        return False
+
+    def set_target(self, node):
+        if self.target_x == node.x:
+            self.target_id = node.id
+            return True
+        return False
+
     def __repr__(self):
         return f'{self.__class__.__name__}({super().__str__()})'
+
     def __lt__(self, other):
         return super().__lt__(other)
 
-class Left(Node):
-    """
-        The Left and Right Nodes represent the connections between
-        the Grammar and Language nodes and will ultimately be the edges
-        in the graph.
-    """
-    def __init__(self, **kwargs):
-        self.tier_n  = kwargs['tier_n']
-        self.x       = kwargs['x']
-        self.y       = kwargs['y']
-        self.from_id = kwargs['from_id']
-        self.to_id   = kwargs['to_id']
-    def __str__(self):
-        return f'{self.__class__.__name__}({super().__str__()})'
-
-class Right(Left):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
 
 class Element:
     """
@@ -196,113 +145,98 @@ class Element:
                     derives the part of speech or special flags.
                 coords - the coordinates of the element in the link-parser text
                     in terms of:
-                        y - line number
-                        x1 - the leading column number
-                        x2 - the last column number
+                        row_N - line number
+                        col_i - element number on line
         """
+        self.x = -1
+        self.col_i, self.row_i = conf['col_i'], conf['row_i']
+        self.source_x = conf.get('source_x', None)
+        self.target_x = conf.get('target_x', None)
         if len(conf['text']) > 1 and '.' in conf['text']:
-            self.text, self.pos = conf['text'].split('.', 1)
+            self.text, self.tag = conf['text'].split('.', 1)
         else:
-            self.text, self.pos = conf['text'], ""
+            self.text, self.tag = conf['text'], None
         self.flag = ""
         if '[' in self.text:
             self.text, self.flag = self.text.split('[', 1)
             self.flag = self.flag.rstrip(']')
-        self.y, self.x1, self.x2 = conf['coords']
-        self.x = self.x1 + ( self.x2 - self.x1 ) / 2
+
+    @property
+    def id(self):
+        if self.tag is None or len(self.tag) == 0:
+            return f'{self.col_i}.{self.row_i}:{self.text}'
+        return f'{self.col_i}.{self.row_i}:{self.text}.{self.tag}'
+
+    def set_x(self, x):
+        self.x = x
+
+    def get_xx(self):
+        return self.source_x, self.target_x
 
     def __repr__(self):
-        return f'[{self.y},{self.x1},{self.x2}]' \
-               '( ' \
-               f'{self.text},{self.flag},{self.pos}' \
-               ' )'
+        if self.source_x is None:
+            if self.tag is None:
+                return pformat({'id': self.id,
+                                'label': self.text})
+            return pformat({'id': self.id,
+                            'label': self.text,
+                            'tag': self.tag})
+        return pformat({'id': self.id,
+                        'label': self.text,
+                        'source_x': self.source_x,
+                        'target_x': self.target_x})
+
 
 class NodeDB:
     """
         Temporary database of Nodes parsed from the link-parser text diagram.
     """
     def __init__(self):
-        self.db = set()
-        self.depth = 0
-        self.tier_ns = set()
-    @property
-    def tiers(self):
+        self.nodes = set()
+        self.edges = set()
+
+    def add(self, item):
         """
-            The tiers property is a sorted list of tier numbers
-            represented in the Node database.
-            The tier the vertical row that a node appears in. The even
-            tiers will contain Language and Grammar nodes. The odd
-            number tiers will contain the Left and Right relationship
-            nodes.
+            The item added may be a Node or an Edge.
+            If an Edge is added it is assumed that the source and target Nodes
+            for the Edge have already been added and the source and target ID
+            properties will be set upon adding them.
         """
-        return sorted(list(self.tier_ns))
-    def add(self, node):
-        """
-            When a node is added to the database its tier
-            number is set.
-        """
-        if node.tier_n == 0:
-            if len(self.tier_ns):
-                node.tier_n = max(list(self.tier_ns))
-            if node.y > self.depth:
-                node.tier_n += 2
-        self.depth = max(node.y, self.depth)
-        self.tier_ns.add(node.tier_n)
-        self.db.add(node)
-    def extend(self, nodes):
-        """
-            Add a collection of nodes in a single whack.
-        """
-        for node in nodes:
-            self.add(node)
-    def nodes(self):
-        """
-            Produce an iterator of "node" Nodes, which only includes
-            the Language and Grammar nodes and excluces Left and Right Nodes.
-        """
-        for node in sorted(list(self.db)):
-            if not isinstance(node, Left) and not isinstance(node, Right):
-                yield node
-    def edges(self):
-        """
-            Produce an iterator of "edge" Nodes, which only includes
-            the Left and Right Nodes.
-        """
-        for node in sorted(list(self.db)):
-            if isinstance(node, Left) or isinstance(node, Right):
-                yield node
+        if isinstance(item, Edge):
+            nodes = self.query({'x': {'$eq': item.source_x}})
+            item.set_source(next(nodes))
+            nodes = self.query({'x': {'$eq': item.target_x}})
+            item.set_target(next(nodes))
+            self.edges.add(item)
+        elif isinstance(item, Node):
+            self.nodes.add(item)
+        else:
+            raise ValueError(f'{item} is not a Node or an Edge')
+
     def query(self, where):
         """
             Produce an iterator of Nodes that match the given where clause.
         """
-        for node in self.db:
+        for node in self.nodes:
             if node.matches(where):
                 yield node
-    def count(self, where):
-        """
-            Return a count of the number of nodes matching.
-        """
-        return len(list(self.query(where)))
+
     def __repr__(self):
         """
            Produce a sparse stringification of the database for debug purposes.
         """
-        output = []
-        for node in sorted(self.db):
-            record = {
-                'tier_n': node.tier_n,
-                'x': node.x,
-                'y': node.y,
-                'type': node.__class__.__name__
-            }
-            if hasattr(node, 'text'):
-                record['text'] = node.text
-            if hasattr(node, 'x1'):
-                record['x1'] = node.x1
-            if hasattr(node, 'x2'):
-                record['x2'] = node.x2
-            output.append(record)
-        return pformat(output, width=120, sort_dicts=True, compact=True)
+        return pformat(self.graph()) 
+
+    def graph(self):
+        nodes = [{'id': node.get('id', node.get('text')),
+                  'label': node.get('text'),
+                  'tag': node.get('tag', None)}
+                 for node in sorted(self.nodes, key=lambda node: node.x)]
+        edges = [{'source_id': edge.source_id,
+                  'target_id': edge.target_id,
+                  'label': edge.label}
+                 for edge in sorted(self.edges, key=lambda edge: edge.source_x)]
+        return {"nodes": nodes, "edges": edges}
 
 
 def get_linkgrammar_text(sentence):
@@ -364,32 +298,26 @@ def extract_elements(line_n, line):
     elements = []
     line = line.replace('|', " ")
     if line_n == 0:
-        indent = 0
         tokens = line.split(' ')
         for token_n, token in enumerate(tokens):
-            from_i = indent + token_n
-            to_i = from_i + len(token) - 1
-            elements.append(Element(
-                                text   = token,
-                                coords = [line_n, from_i, to_i]
-                            ))
-            indent += len(token)
+            elements.append(Element(text = token, col_i = token_n, row_i = line_n))
         return elements
+    xs = [x_i for x_i, c in enumerate(line) if c == '+' for _ in (0, 1)]
+    if len(xs) == 0:
+        return None
+    xs = xs[1:-1]
     tokens = line.split('+')
     if len(tokens) > 0:
-        indent = 0
         for token_n, token in enumerate([t for t in tokens
                                          if len(t) > 0]):
-            indent += len(token)
             if len(token.strip()) == 0:
                 continue
-            label = token.replace('-', "")
-            from_i = indent - len(token) + token_n - 1
-            to_i = from_i + len(token) + 1
-            elements.append(Element(
-                                text = label,
-                                coords = [line_n, from_i, to_i]
-                            ))
+            label = token.replace('-', "").replace('>', "")
+            elements.append(Element(text = label,
+                                    col_i = len(elements),
+                                    row_i = line_n,
+                                    source_x = xs.pop(0),
+                                    target_x = xs.pop(0)))
     if len(elements) == 0:
         return None
     return elements
@@ -402,73 +330,44 @@ def create_nodedb(linkage_txt):
     """
     element_lists = []
     for line_n, line in enumerate(reversed(linkage_txt.split("\n"))):
-        elements = extract_elements(line_n, line)
-        if elements is None:
-            continue
-        element_lists.append(elements)
+        if line_n == 1:
+            col_xs = [x_i for x_i, c in enumerate(line) if c != ' ']
+            for element_i, x in enumerate(col_xs):
+                element_lists[-1][element_i].set_x(x)
+        else: 
+            elements = extract_elements(line_n, line)
+            if elements is None:
+                continue
+            element_lists.append(elements)
     db = NodeDB()
-    for row_n, elements in enumerate(element_lists):
-        for element in elements:
-            if row_n == 0:
-                db.add(Language(element))
+    for row_i, elements in enumerate(element_lists):
+        for col_i, element in enumerate(elements):
+            if row_i == 0:
+                db.add(Node(element))
             else:
-                db.add(Grammar(element))
-
-    edge_nodes = []
-
-    for node in db.query({'tier_n': {'$eq': 0}}):
-        for left_ancestor in db.query(
-            {'tier_n': {'$gt': 0},
-                 'x1': {'$between': [node.x - 1, node.x + 1]}}):
-            edge_nodes.append(Left(tier_n  = left_ancestor.tier_n - 1,
-                                   x       = node.x,
-                                   y       = left_ancestor.y,
-                                   from_id = left_ancestor.id,
-                                   to_id   = node.id))
-        for right_ancestor in db.query(
-            {'tier_n': {'$gt': 0},
-                 'x2': {'$between': [node.x - 1, node.x + 1]}}):
-            edge_nodes.append(Right(tier_n  = right_ancestor.tier_n - 1,
-                                    x       = node.x,
-                                    y       = right_ancestor.y,
-                                    from_id = right_ancestor.id,
-                                    to_id   = node.id))
-    db.extend(edge_nodes)
+                db.add(Edge(element))
 
     return db
 
 
-def linkgrammar_layout(db):
-    """
-        Produces a map of nodes to (x,y) positions
-        for use with networkx.draw().
-    """
-    pos = {}
-    labels = {}
-
-    for node in db.nodes():
-        pos[node] = [node.x, node.tier_n]
-
-    for edge in db.edges():
-        a = next(db.query({'id': {'$eq': edge.from_id}}))
-        b = next(db.query({'id': {'$eq': edge.to_id}}))
-        labels[(a, b)] = edge.__class__.__name__[0]
-
-    return pos, labels
-
-def generate_graph(db, labels):
+def generate_graph(db):
     """
         Produce a networkx.DiGraph for the given NodeDB.
     """
     dg = nx.DiGraph()
+    graph = db.graph()
 
-    for node in db.nodes():
-        dg.add_node(node)
+    for node in graph['nodes']:
+        dg.add_node(node['id'], label=node['label'], tag=node['tag'])
 
-    for (n1, n2), _ in labels.items():
-        dg.add_edge(n1, n2)
+    for edge in graph['edges']:
+        dg.add_edge(edge['source_id'], edge['target_id'], label=edge['label'])
 
-    return dg
+    pos = nx.shell_layout(dg)
+    labels = nx.get_node_attributes(dg, 'label')
+    edge_labels = nx.get_edge_attributes(dg, 'label')
+
+    return dg, pos, labels, edge_labels
 
 
 def parse(sentence):
@@ -489,18 +388,22 @@ def parse(sentence):
         print('No nodes found', file=sys.stderr)
         return 1
 
-    print(db)
+    pprint(db)
 
-    pos, labels = linkgrammar_layout(db)
-
-    dg = generate_graph(db, labels)
+    dg, pos, labels, edge_labels = generate_graph(db)
 
     nx.draw(dg, pos,
-            with_labels = True,
-            node_size   = 1500,
+            with_labels = False,
+            node_size   = 3000,
             font_size   = 8,
-            font_weight = 'bold')
-    nx.draw_networkx_edge_labels(dg, pos, edge_labels=labels)
+            font_weight = 'bold',
+            node_color  = 'lightblue')
+    nx.draw_networkx_labels(dg, pos,
+                            labels = labels,
+                            font_size = 10)
+    nx.draw_networkx_edge_labels(dg, pos,
+                                 edge_labels = edge_labels,
+                                 font_size = 10)
 
     plt.savefig(PNG_FILE)
 
